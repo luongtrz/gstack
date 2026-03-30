@@ -817,3 +817,99 @@ describe('cleanup and screenshot buttons', () => {
     expect(css).toContain('.chat-notification');
   });
 });
+
+describe('cleanup heuristics (write-commands.ts)', () => {
+  const wcSrc = fs.readFileSync(path.join(ROOT, 'src', 'write-commands.ts'), 'utf-8');
+
+  test('cleanup defaults to --all when no args provided', () => {
+    // Should not throw on empty args, should default to doAll
+    expect(wcSrc).toContain('if (args.length === 0)');
+    expect(wcSrc).toContain('doAll = true');
+  });
+
+  test('CLEANUP_SELECTORS has overlays category', () => {
+    expect(wcSrc).toContain('overlays: [');
+    expect(wcSrc).toContain('paywall');
+    expect(wcSrc).toContain('newsletter');
+    expect(wcSrc).toContain('interstitial');
+    expect(wcSrc).toContain('push-notification');
+    expect(wcSrc).toContain('app-banner');
+  });
+
+  test('CLEANUP_SELECTORS ads has major ad networks', () => {
+    expect(wcSrc).toContain('doubleclick');
+    expect(wcSrc).toContain('googlesyndication');
+    expect(wcSrc).toContain('amazon-adsystem');
+    expect(wcSrc).toContain('outbrain');
+    expect(wcSrc).toContain('taboola');
+    expect(wcSrc).toContain('criteo');
+  });
+
+  test('CLEANUP_SELECTORS cookies has major consent frameworks', () => {
+    expect(wcSrc).toContain('onetrust');
+    expect(wcSrc).toContain('CybotCookiebot');
+    expect(wcSrc).toContain('truste');
+    expect(wcSrc).toContain('qc-cmp2');
+    expect(wcSrc).toContain('Quantcast');
+  });
+
+  test('cleanup uses !important to override inline styles', () => {
+    // Elements with inline style="display:block" need !important to hide
+    expect(wcSrc).toContain("setProperty('display', 'none', 'important')");
+  });
+
+  test('cleanup unlocks scroll (body overflow:hidden)', () => {
+    expect(wcSrc).toContain("overflow === 'hidden'");
+    expect(wcSrc).toContain("setProperty('overflow', 'auto', 'important')");
+  });
+
+  test('cleanup removes blur effects (paywall blur)', () => {
+    expect(wcSrc).toContain("filter?.includes('blur')");
+    expect(wcSrc).toContain("setProperty('filter', 'none', 'important')");
+  });
+
+  test('cleanup removes article truncation (max-height)', () => {
+    expect(wcSrc).toContain('truncat');
+    expect(wcSrc).toContain("setProperty('max-height', 'none', 'important')");
+  });
+
+  test('cleanup collapses empty ad placeholder whitespace', () => {
+    expect(wcSrc).toContain('empty placeholders');
+    // Should check text content length before collapsing
+    expect(wcSrc).toContain('text.length < 20');
+  });
+
+  test('sticky cleanup skips gstack control indicator', () => {
+    expect(wcSrc).toContain("el.id === 'gstack-ctrl'");
+  });
+});
+
+describe('chat toolbar buttons disabled state', () => {
+  const js = fs.readFileSync(path.join(ROOT, '..', 'extension', 'sidepanel.js'), 'utf-8');
+  const css = fs.readFileSync(path.join(ROOT, '..', 'extension', 'sidepanel.css'), 'utf-8');
+
+  test('setActionButtonsEnabled function exists', () => {
+    expect(js).toContain('function setActionButtonsEnabled(enabled)');
+  });
+
+  test('buttons are disabled when disconnected', () => {
+    // updateConnection should call setActionButtonsEnabled(false) when no URL
+    expect(js).toContain('setActionButtonsEnabled(false)');
+    expect(js).toContain('setActionButtonsEnabled(true)');
+  });
+
+  test('runCleanup silently returns when disconnected (no error spam)', () => {
+    // Should NOT show "Not connected" notification, just return silently
+    const cleanupFn = js.slice(
+      js.indexOf('async function runCleanup('),
+      js.indexOf('\n}', js.indexOf('async function runCleanup(') + 1) + 2,
+    );
+    expect(cleanupFn).not.toContain('Not connected to browse server');
+  });
+
+  test('CSS has disabled style for action buttons', () => {
+    expect(css).toContain('.quick-action-btn.disabled');
+    expect(css).toContain('.inspector-action-btn.disabled');
+    expect(css).toContain('pointer-events: none');
+  });
+});
