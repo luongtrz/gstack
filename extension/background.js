@@ -406,29 +406,35 @@ if (chrome.sidePanel && chrome.sidePanel.setPanelBehavior) {
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
 }
 
-// Auto-open side panel on install/update AND every service worker startup.
-// onInstalled fires on first install / extension update.
-// The startup block below fires every time the browser launches (persistent context reuse).
-chrome.runtime.onInstalled.addListener(async () => {
-  setTimeout(async () => {
+// Auto-open side panel with retry. chrome.sidePanel.open() can fail silently
+// if the window/tab isn't fully ready yet. Retry up to 5 times with backoff.
+async function autoOpenSidePanel() {
+  if (!chrome.sidePanel?.open) return;
+  for (let attempt = 0; attempt < 5; attempt++) {
     try {
-      const [win] = await chrome.windows.getAll({ windowTypes: ['normal'] });
-      if (win && chrome.sidePanel?.open) {
-        await chrome.sidePanel.open({ windowId: win.id });
+      const wins = await chrome.windows.getAll({ windowTypes: ['normal'] });
+      if (wins.length > 0) {
+        await chrome.sidePanel.open({ windowId: wins[0].id });
+        console.log(`[gstack] Side panel opened on attempt ${attempt + 1}`);
+        return; // success
       }
-    } catch {}
-  }, 1000);
+    } catch (e) {
+      // May throw if window isn't ready or user gesture required
+      console.log(`[gstack] Side panel open attempt ${attempt + 1} failed:`, e.message);
+    }
+    // Backoff: 500ms, 1000ms, 2000ms, 3000ms, 5000ms
+    await new Promise(r => setTimeout(r, [500, 1000, 2000, 3000, 5000][attempt]));
+  }
+  console.log('[gstack] Side panel auto-open failed after 5 attempts');
+}
+
+// Fire on install/update
+chrome.runtime.onInstalled.addListener(() => {
+  autoOpenSidePanel();
 });
 
-// Also auto-open on every browser launch (not just install)
-setTimeout(async () => {
-  try {
-    const [win] = await chrome.windows.getAll({ windowTypes: ['normal'] });
-    if (win && chrome.sidePanel?.open) {
-      await chrome.sidePanel.open({ windowId: win.id });
-    }
-  } catch {}
-}, 1500);
+// Fire on every service worker startup (covers persistent context reuse)
+autoOpenSidePanel();
 
 // ─── Tab Switch Detection ────────────────────────────────────────
 // Notify sidepanel instantly when the user switches tabs in the browser.

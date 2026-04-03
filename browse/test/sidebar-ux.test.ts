@@ -1192,3 +1192,133 @@ describe('LLM-based cleanup (smart agent cleanup)', () => {
     expect(wcSrc).toContain("role') === 'navigation'");
   });
 });
+
+// ─── Welcome page + sidebar auto-open ────────────────────────────
+
+describe('welcome page', () => {
+  const welcomePath = path.join(ROOT, 'src', 'welcome.html');
+  const welcomeExists = fs.existsSync(welcomePath);
+  const welcomeSrc = welcomeExists ? fs.readFileSync(welcomePath, 'utf-8') : '';
+
+  test('welcome.html exists in browse/src/', () => {
+    expect(welcomeExists).toBe(true);
+  });
+
+  test('welcome page has GStack Browser branding', () => {
+    expect(welcomeSrc).toContain('GStack Browser');
+  });
+
+  test('welcome page has extension-ready listener to hide prompt', () => {
+    expect(welcomeSrc).toContain('gstack-extension-ready');
+    expect(welcomeSrc).toContain('sidebar-prompt');
+  });
+
+  test('welcome page does NOT have a misaligned arrow', () => {
+    // Arrow was removed because it can never align with browser chrome
+    expect(welcomeSrc).not.toContain('arrow-up');
+    expect(welcomeSrc).not.toContain('↑');
+  });
+
+  test('welcome page has left-aligned text (no center-align on headings)', () => {
+    // User preference: always left-align, never center
+    expect(welcomeSrc).not.toMatch(/text-align:\s*center/);
+  });
+
+  test('welcome page uses dark theme', () => {
+    expect(welcomeSrc).toContain('#0C0C0C'); // --base (near-black)
+    expect(welcomeSrc).toContain('#141414'); // --surface (card bg)
+  });
+});
+
+describe('server /welcome endpoint', () => {
+  const serverSrc = fs.readFileSync(path.join(ROOT, 'src', 'server.ts'), 'utf-8');
+
+  test('/welcome endpoint exists in server.ts', () => {
+    expect(serverSrc).toContain("url.pathname === '/welcome'");
+  });
+
+  test('/welcome serves HTML content type', () => {
+    const welcomeSection = serverSrc.slice(
+      serverSrc.indexOf("url.pathname === '/welcome'"),
+      serverSrc.indexOf("url.pathname === '/health'"),
+    );
+    expect(welcomeSection).toContain("'Content-Type': 'text/html");
+  });
+
+  test('/welcome redirects to about:blank if no welcome file found', () => {
+    const welcomeSection = serverSrc.slice(
+      serverSrc.indexOf("url.pathname === '/welcome'"),
+      serverSrc.indexOf("url.pathname === '/health'"),
+    );
+    expect(welcomeSection).toContain('302');
+    expect(welcomeSection).toContain('about:blank');
+  });
+});
+
+describe('headed launch navigates to welcome page', () => {
+  const serverSrc = fs.readFileSync(path.join(ROOT, 'src', 'server.ts'), 'utf-8');
+
+  test('server navigates to /welcome after startup in headed mode', () => {
+    // Navigation must happen AFTER Bun.serve() starts (not during launchHeaded)
+    // because the HTTP server needs to be listening before the browser requests /welcome
+    const afterServe = serverSrc.slice(serverSrc.indexOf('Bun.serve('));
+    expect(afterServe).toContain('/welcome');
+    expect(afterServe).toContain("getConnectionMode() === 'headed'");
+  });
+
+  test('welcome navigation does NOT happen in browser-manager (too early)', () => {
+    const bmSrc = fs.readFileSync(path.join(ROOT, 'src', 'browser-manager.ts'), 'utf-8');
+    // browser-manager.ts should NOT navigate to /welcome because the server
+    // isn't listening yet when launchHeaded() runs
+    const launchHeadedSection = bmSrc.slice(
+      bmSrc.indexOf('async launchHeaded('),
+      bmSrc.indexOf('// Browser disconnect handler'),
+    );
+    expect(launchHeadedSection).not.toContain('/welcome');
+  });
+});
+
+describe('sidebar auto-open (background.js)', () => {
+  const bgSrc = fs.readFileSync(path.join(ROOT, '..', 'extension', 'background.js'), 'utf-8');
+
+  test('autoOpenSidePanel function exists with retry logic', () => {
+    expect(bgSrc).toContain('async function autoOpenSidePanel');
+    expect(bgSrc).toContain('attempt < 5');
+  });
+
+  test('auto-open fires on install AND on every service worker startup', () => {
+    // onInstalled fires on first install / extension update
+    expect(bgSrc).toContain('chrome.runtime.onInstalled.addListener');
+    expect(bgSrc).toContain('autoOpenSidePanel()');
+    // Top-level call fires on every service worker startup
+    const topLevelCalls = bgSrc.match(/^autoOpenSidePanel\(\)/gm);
+    expect(topLevelCalls).not.toBeNull();
+    expect(topLevelCalls!.length).toBeGreaterThanOrEqual(1);
+  });
+
+  test('retry uses backoff delays (not fixed interval)', () => {
+    expect(bgSrc).toContain('500');
+    expect(bgSrc).toContain('1000');
+    expect(bgSrc).toContain('2000');
+    expect(bgSrc).toContain('3000');
+    expect(bgSrc).toContain('5000');
+  });
+
+  test('auto-open uses chrome.sidePanel.open with windowId', () => {
+    expect(bgSrc).toContain('chrome.sidePanel.open');
+    expect(bgSrc).toContain('windowId');
+  });
+
+  test('auto-open logs success and failure for debugging', () => {
+    expect(bgSrc).toContain('Side panel opened on attempt');
+    expect(bgSrc).toContain('Side panel auto-open failed');
+  });
+});
+
+describe('extension dispatches gstack-extension-ready event', () => {
+  const contentSrc = fs.readFileSync(path.join(ROOT, '..', 'extension', 'content.js'), 'utf-8');
+
+  test('content.js dispatches gstack-extension-ready CustomEvent', () => {
+    expect(contentSrc).toContain("new CustomEvent('gstack-extension-ready')");
+  });
+});
