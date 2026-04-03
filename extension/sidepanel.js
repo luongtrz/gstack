@@ -1391,32 +1391,50 @@ document.getElementById('conn-copy').addEventListener('click', () => {
   });
 });
 
-// Try to connect immediately, retry every 2s until connected
+// Try to connect immediately, retry every 2s until connected.
+// Show exactly what's happening at each step so the user is never
+// staring at a blank "Connecting..." with no info.
 let connectAttempts = 0;
+function setLoadingStatus(msg, debug) {
+  const status = document.getElementById('loading-status');
+  const dbg = document.getElementById('loading-debug');
+  if (status) status.textContent = msg;
+  if (dbg && debug !== undefined) dbg.textContent = debug;
+}
+
 function tryConnect() {
   connectAttempts++;
-  const loadingEl = document.getElementById('chat-loading');
-  if (loadingEl) {
-    const detail = connectAttempts <= 1 ? 'Connecting...'
-      : `Connecting... (attempt ${connectAttempts})`;
-    const p = loadingEl.querySelector('p');
-    if (p) p.textContent = detail;
-  }
+  setLoadingStatus(
+    `Looking for browse server... (attempt ${connectAttempts})`,
+    `Asking background.js for server port...`
+  );
+
   chrome.runtime.sendMessage({ type: 'getPort' }, (resp) => {
+    if (chrome.runtime.lastError) {
+      setLoadingStatus(
+        `Extension error (attempt ${connectAttempts})`,
+        `chrome.runtime.sendMessage failed:\n${chrome.runtime.lastError.message}`
+      );
+      setTimeout(tryConnect, 2000);
+      return;
+    }
+
+    const port = resp?.port || '?';
+    const connected = resp?.connected || false;
+    const hasToken = !!(resp?.token);
+
     if (resp && resp.port && resp.connected) {
+      setLoadingStatus(
+        `Server found on port ${port}, connecting...`,
+        `token: ${hasToken ? 'yes' : 'NO'}\nStarting SSE + chat polling...`
+      );
       const url = `http://127.0.0.1:${resp.port}`;
       updateConnection(url, resp.token || null);
     } else {
-      // Show debug info after 5 failed attempts
-      if (connectAttempts >= 5 && loadingEl) {
-        const p = loadingEl.querySelector('p');
-        if (p) {
-          const port = resp?.port || '?';
-          const connected = resp?.connected || false;
-          const hasToken = !!(resp?.token);
-          p.textContent = `Waiting for server... port:${port} connected:${connected} token:${hasToken} (attempt ${connectAttempts})`;
-        }
-      }
+      setLoadingStatus(
+        `Waiting for server... (attempt ${connectAttempts})`,
+        `port: ${port}\nserver responding: ${connected}\ntoken: ${hasToken ? 'yes' : 'no'}\n\n${!connected ? 'The browse server may still be starting.\nRun /open-gstack-browser in Claude Code.' : 'Server found but not healthy yet.'}`
+      );
       setTimeout(tryConnect, 2000);
     }
   });
