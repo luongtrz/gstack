@@ -437,10 +437,14 @@ function processTemplate(tmplPath: string, host: Host = 'claude'): { outputPath:
   const ctx: TemplateContext = { skillName, tmplPath, benefitsFrom, host, paths: HOST_PATHS[host], preambleTier };
 
   // Replace placeholders (supports parameterized: {{NAME:arg1:arg2}})
+  // Config-driven: suppressedResolvers return empty string for this host
+  const currentHostConfig = getHostConfig(host);
+  const suppressed = new Set(currentHostConfig.suppressedResolvers || []);
   let content = tmplContent.replace(/\{\{(\w+(?::[^}]+)?)\}\}/g, (match, fullKey) => {
     const parts = fullKey.split(':');
     const resolverName = parts[0];
     const args = parts.slice(1);
+    if (suppressed.has(resolverName)) return '';
     const resolver = RESOLVERS[resolverName];
     if (!resolver) throw new Error(`Unknown placeholder {{${resolverName}}} in ${relTmplPath}`);
     return args.length > 0 ? resolver(ctx, args) : resolver(ctx);

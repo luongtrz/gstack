@@ -38,7 +38,7 @@ const claude: HostConfig = {
     linkingStrategy: 'real-dir-symlink',
   },
 
-  coAuthorTrailer: 'Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>',
+  coAuthorTrailer: 'Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>',
   learningsMode: 'full',
 };
 
