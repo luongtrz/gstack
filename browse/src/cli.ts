@@ -214,7 +214,9 @@ async function startServer(extraEnv?: Record<string, string>): Promise<ServerSta
   // BROWSE_PARENT_PID=0 in the environment. Useful for CI, non-interactive
   // shells, and short-lived Bash invocations that need the server to outlive
   // the spawning CLI. Defaults to the current process PID (watchdog active).
-  const parentPid = process.env.BROWSE_PARENT_PID === '0' ? '0' : String(process.pid);
+  // Parse as int so stray whitespace ("0\n") still opts out — matches the
+  // server's own parseInt at server.ts:760.
+  const parentPid = parseInt(process.env.BROWSE_PARENT_PID || '', 10) === 0 ? '0' : String(process.pid);
 
   if (IS_WINDOWS && NODE_SERVER_SCRIPT) {
     // Windows: Bun.spawn() + proc.unref() doesn't truly detach on Windows —
