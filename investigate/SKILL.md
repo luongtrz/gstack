@@ -128,7 +128,38 @@ or invoking other gstack skills, use the `/gstack-` prefix (e.g., `/gstack-qa` i
 of `/qa`, `/gstack-ship` instead of `/ship`). Disk paths are unaffected — always use
 `~/.claude/skills/gstack/[skill-name]/SKILL.md` for reading skill files.
 
-If output shows `UPGRADE_AVAILABLE <old> <new>`: read `~/.claude/skills/gstack/gstack-upgrade/SKILL.md` and follow the "Inline upgrade flow" (auto-upgrade if configured, otherwise AskUserQuestion with 4 options, write snooze state if declined). If `JUST_UPGRADED <from> <to>`: tell user "Running gstack v{to} (just updated!)" and continue.
+If output shows `UPGRADE_AVAILABLE <old> <new>`: read `~/.claude/skills/gstack/gstack-upgrade/SKILL.md` and follow the "Inline upgrade flow" (auto-upgrade if configured, otherwise AskUserQuestion with 4 options, write snooze state if declined).
+
+If output shows `JUST_UPGRADED <from> <to>` AND `SPAWNED_SESSION` is NOT set: tell
+the user "Running gstack v{to} (just updated!)" and then check for new features to
+surface. For each per-feature marker below, if the marker file is missing AND the
+feature is plausibly useful for this user, use AskUserQuestion to let them try it.
+Fire once per feature per user, NOT once per upgrade.
+
+**In spawned sessions (`SPAWNED_SESSION` = "true"): SKIP feature discovery entirely.**
+Just print "Running gstack v{to}" and continue. Orchestrators do not want interactive
+prompts from sub-sessions.
+
+**Feature discovery markers and prompts** (one at a time, max one per session):
+
+1. `~/.claude/skills/gstack/.feature-prompted-continuous-checkpoint` →
+   Prompt: "Continuous checkpoint auto-commits your work as you go with `WIP:` prefix
+   so you never lose progress to a crash. Local-only by default — doesn't push
+   anywhere unless you turn that on. Want to try it?"
+   Options: A) Enable continuous mode, B) Show me first (print the section from
+   the preamble Continuous Checkpoint Mode), C) Skip.
+   If A: run `~/.claude/skills/gstack/bin/gstack-config set checkpoint_mode continuous`.
+   Always: `touch ~/.claude/skills/gstack/.feature-prompted-continuous-checkpoint`
+
+2. `~/.claude/skills/gstack/.feature-prompted-model-overlay` →
+   Inform only (no prompt): "Model overlays are active. `MODEL_OVERLAY: {model}`
+   shown in the preamble output tells you which behavioral patch is applied.
+   Override with `--model` when regenerating skills (e.g., `bun run gen:skill-docs
+   --model gpt-5.4`). Default is claude."
+   Always: `touch ~/.claude/skills/gstack/.feature-prompted-model-overlay`
+
+After handling JUST_UPGRADED (prompts done or skipped), continue with the skill
+workflow.
 
 If `LAKE_INTRO` is `no`: Before continuing, introduce the Completeness Principle.
 Tell the user: "gstack follows the **Boil the Lake** principle — always do the complete
