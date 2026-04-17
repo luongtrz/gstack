@@ -16,15 +16,27 @@
  *                                (default: include them with unavailable marker)
  *   --judge                      Run Anthropic SDK judge on outputs for quality score
  *                                (requires ANTHROPIC_API_KEY; adds ~$0.05 per call)
+ *   --dry-run                    Validate flags + resolve auth, don't invoke providers
+ *                                (matches gstack-publish --dry-run semantics)
  *
  * Examples:
  *   gstack-model-benchmark --prompt "Write a haiku about databases" --models claude,gpt
  *   gstack-model-benchmark ./test-prompt.txt --models claude,gpt,gemini --judge
+ *   gstack-model-benchmark --prompt "hi" --models claude,gpt,gemini --dry-run
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
 import { runBenchmark, formatTable, formatJson, formatMarkdown, type BenchmarkInput } from '../test/helpers/benchmark-runner';
+import { ClaudeAdapter } from '../test/helpers/providers/claude';
+import { GptAdapter } from '../test/helpers/providers/gpt';
+import { GeminiAdapter } from '../test/helpers/providers/gemini';
+
+const ADAPTER_FACTORIES = {
+  claude: () => new ClaudeAdapter(),
+  gpt: () => new GptAdapter(),
+  gemini: () => new GeminiAdapter(),
+};
 
 type OutputFormat = 'table' | 'json' | 'markdown';
 
@@ -75,6 +87,12 @@ async function main(): Promise<void> {
   const output = (arg('--output', 'table') as OutputFormat);
   const skipUnavailable = flag('--skip-unavailable');
   const doJudge = flag('--judge');
+  const dryRun = flag('--dry-run');
+
+  if (dryRun) {
+    await dryRunReport({ prompt, providers, workdir, timeoutMs, output, doJudge });
+    return;
+  }
 
   const input: BenchmarkInput = {
     prompt,
@@ -103,6 +121,46 @@ async function main(): Promise<void> {
     default:         out = formatTable(report); break;
   }
   process.stdout.write(out + '\n');
+}
+
+async function dryRunReport(opts: {
+  prompt: string;
+  providers: Array<'claude' | 'gpt' | 'gemini'>;
+  workdir: string;
+  timeoutMs: number;
+  output: OutputFormat;
+  doJudge: boolean;
+}): Promise<void> {
+  const lines: string[] = [];
+  lines.push('== gstack-model-benchmark --dry-run ==');
+  lines.push(`  prompt:     ${opts.prompt.length > 80 ? opts.prompt.slice(0, 80) + '…' : opts.prompt}`);
+  lines.push(`  providers:  ${opts.providers.join(', ')}`);
+  lines.push(`  workdir:    ${opts.workdir}`);
+  lines.push(`  timeout_ms: ${opts.timeoutMs}`);
+  lines.push(`  output:     ${opts.output}`);
+  lines.push(`  judge:      ${opts.doJudge ? 'on (Anthropic SDK)' : 'off'}`);
+  lines.push('');
+  lines.push('Adapter availability:');
+  let authFailures = 0;
+  for (const name of opts.providers) {
+    const factory = ADAPTER_FACTORIES[name];
+    if (!factory) {
+      lines.push(`  ${name}: UNKNOWN PROVIDER`);
+      authFailures += 1;
+      continue;
+    }
+    const adapter = factory();
+    const check = await adapter.available();
+    if (check.ok) {
+      lines.push(`  ${adapter.name}: OK`);
+    } else {
+      lines.push(`  ${adapter.name}: NOT READY — ${check.reason}`);
+      authFailures += 1;
+    }
+  }
+  lines.push('');
+  lines.push(`(--dry-run — no prompts sent. ${authFailures} provider(s) unavailable.)`);
+  process.stdout.write(lines.join('\n') + '\n');
 }
 
 main().catch(err => {
