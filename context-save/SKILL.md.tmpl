@@ -112,21 +112,39 @@ saved file.
 
 ### Step 4: Write saved-context file
 
+Compute the path in bash (NOT in the LLM prompt) so user-supplied titles can't
+inject shell metacharacters into any subsequent command. The sanitizer is an
+allowlist: only `a-z 0-9 - .` survive.
+
 ```bash
 {{SLUG_SETUP}}
 CHECKPOINT_DIR="$HOME/.gstack/projects/$SLUG/checkpoints"
 mkdir -p "$CHECKPOINT_DIR"
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+# Bash-side title sanitize. Pass the raw title as $1 when running this block.
+# Example: TITLE_RAW="wintermute progress" bash -c '...'
+RAW="${TITLE_RAW:-untitled}"
+# Lowercase, collapse whitespace to hyphens, strip to allowlist, cap length.
+TITLE_SLUG=$(printf '%s' "$RAW" | tr '[:upper:]' '[:lower:]' | tr -s ' \t' '-' | tr -cd 'a-z0-9.-' | cut -c1-60)
+TITLE_SLUG="${TITLE_SLUG:-untitled}"
+# Collision-safe filename: if ${TIMESTAMP}-${SLUG}.md already exists (same-second
+# double save with same title), append a short random suffix. Filenames are
+# append-only — never overwrite.
+FILE="${CHECKPOINT_DIR}/${TIMESTAMP}-${TITLE_SLUG}.md"
+if [ -e "$FILE" ]; then
+  SUFFIX=$(LC_ALL=C tr -dc 'a-z0-9' < /dev/urandom 2>/dev/null | head -c 4 || printf '%04x' "$$")
+  FILE="${CHECKPOINT_DIR}/${TIMESTAMP}-${TITLE_SLUG}-${SUFFIX}.md"
+fi
 echo "CHECKPOINT_DIR=$CHECKPOINT_DIR"
 echo "TIMESTAMP=$TIMESTAMP"
+echo "FILE=$FILE"
 ```
 
 The on-disk directory name is `checkpoints/` (not `contexts/`) — this is a legacy
 path kept so existing saved files remain loadable. Users never see it.
 
-Write the file to `{CHECKPOINT_DIR}/{TIMESTAMP}-{title-slug}.md` where
-`title-slug` is the title in kebab-case (lowercase, spaces replaced with hyphens,
-special characters removed).
+Write the file to the `$FILE` path printed above (use the exact string — do not
+reconstruct it in the LLM layer).
 
 The file format:
 

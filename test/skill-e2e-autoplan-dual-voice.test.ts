@@ -85,20 +85,37 @@ Add a new /greet skill that prints a welcome message.
       // Accept EITHER outcome as success:
       //   (a) Both voices produced output (ideal case)
       //   (b) Codex unavailable + Claude voice produced output (graceful degrade)
-      // Session runner returns `output` (final assistant message). Search
-      // transcript tool-call inputs/outputs as a broader net for voice fingerprints.
-      const transcriptText = JSON.stringify(result.transcript || []);
-      const out = (result.output ?? '') + '\n' + transcriptText;
-      const claudeVoiceFired = /Claude\s+(CEO|subagent)|claude-subagent|Agent\s*\(|subagent_type/i.test(out);
-      const codexVoiceFired = /codex\s+(exec|review)|CODEX SAYS|\[via:codex\]|codex-plan-review/i.test(out);
-      const codexUnavailable = /\[codex-unavailable\]|AUTH_FAILED|CODEX_NOT_AVAILABLE|codex_cli_missing|Codex CLI not found/i.test(out);
+      // Search ONLY the tool-call structure — NOT the prompt string that went in.
+      // Matching against full transcript is risky because the prompt itself
+      // contains "plan-ceo-review" and other marker strings that would produce
+      // false positives regardless of skill behavior. Filter to tool_result
+      // content + assistant messages emitted DURING execution.
+      const transcript = Array.isArray(result.transcript) ? result.transcript : [];
+      const executionContent = transcript
+        .filter((entry: any) => entry && (entry.type === 'tool_use' || entry.type === 'tool_result' || entry.role === 'assistant'))
+        .map((entry: any) => JSON.stringify(entry))
+        .join('\n');
+      const out = (result.output ?? '') + '\n' + executionContent;
+
+      // Claude voice: require evidence of a dispatched Agent subagent, not
+      // merely the literal string "Agent(" (which could appear in any text).
+      // Task/Agent tool_use entries have name:"Agent" or subagent_type:"..."
+      const claudeVoiceFired = /"name":\s*"Agent"|"subagent_type":\s*"[^"]/.test(out) ||
+                               /Claude\s+(CEO|subagent)\s+(review|complete|finished)|claude-subagent\s/i.test(out);
+      // Codex voice: require evidence of codex CLI invocation (command string in
+      // a Bash tool_use), not prompt-text mentions.
+      const codexVoiceFired = /"command":\s*"[^"]*codex\s+(exec|review)/.test(out) ||
+                              /CODEX SAYS\s*\(/i.test(out);
+      // Unavailable markers: explicit probe-failure strings emitted by the skill.
+      const codexUnavailable = /\[codex-unavailable\]|AUTH_FAILED\b|CODEX_NOT_AVAILABLE\b|codex_cli_missing|Codex CLI not found/i.test(out);
 
       expect(claudeVoiceFired).toBe(true);
       expect(codexVoiceFired || codexUnavailable).toBe(true);
 
-      // Hang protection: if the skill reached Phase 1 at all, our hardening worked.
-      // If it didn't, this is a regression from the pre-wave stdin-deadlock era.
-      const reachedPhase1 = /Phase 1|CEO\s+Review|Strategy\s*&\s*Scope|plan-ceo-review/i.test(out);
+      // Hang protection: require phase completion evidence, not name mentions.
+      // "Phase 1 complete" or a phase-transition marker, not "plan-ceo-review"
+      // as a bare string (which appears in the prompt itself).
+      const reachedPhase1 = /Phase\s+1\s+(complete|done|finished)|CEO\s+Review\s+(complete|done|approved)|Strategy\s*&\s*Scope\s+(complete|done)|Phase\s+2\s+(started|begin)/i.test(out);
       expect(reachedPhase1).toBe(true);
 
       logCost('autoplan-dual-voice', result);
