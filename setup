@@ -260,6 +260,23 @@ if [ "$NEEDS_BUILD" -eq 1 ]; then
       fi
     done
   fi
+
+  # macOS: install coreutils for `gtimeout` (Codex hang protection in /codex + /autoplan).
+  # macOS ships BSD `timeout`-less; Homebrew's coreutils installs GNU timeout as
+  # `gtimeout` to avoid shadowing BSD utilities. The /codex and /autoplan skills
+  # fall back to unwrapped codex invocations when neither is available — this
+  # auto-install upgrades them to hang-protected where possible.
+  # Skip entirely with GSTACK_SKIP_COREUTILS=1 (CI, managed machines, offline envs).
+  if [ "$(uname -s)" = "Darwin" ] && [ "${GSTACK_SKIP_COREUTILS:-0}" != "1" ]; then
+    if ! command -v gtimeout >/dev/null 2>&1 && ! command -v timeout >/dev/null 2>&1; then
+      if command -v brew >/dev/null 2>&1; then
+        log "Installing coreutils for Codex hang protection (set GSTACK_SKIP_COREUTILS=1 to skip)..."
+        brew install coreutils >/dev/null 2>&1 || log "warning: brew install coreutils failed; /codex will run without hang protection"
+      else
+        log "warning: Homebrew not found. /codex will run without hang protection. Install coreutils manually or set GSTACK_SKIP_COREUTILS=1."
+      fi
+    fi
+  fi
 fi
 
 if [ ! -x "$BROWSE_BIN" ]; then
