@@ -46,8 +46,15 @@ DATA="$(curl -sf --max-time 15 \
   -H "apikey: ${ANON_KEY}" \
   2>/dev/null || echo "{}")"
 
-# Extract the security section
-SEC_SECTION="$(echo "$DATA" | grep -o '"security":{[^}]*}' 2>/dev/null || echo "")"
+# Extract the security section. Prefer jq for brace-balanced parsing of
+# nested arrays/objects (top_attack_domains etc.). Fall back to regex if
+# jq isn't installed — the regex is lossy but the dashboard degrades
+# gracefully to "0 attacks" rather than misreporting numbers.
+if command -v jq >/dev/null 2>&1; then
+  SEC_SECTION="$(echo "$DATA" | jq -rc '.security // empty | "\"security\":\(.)"' 2>/dev/null || echo "")"
+else
+  SEC_SECTION="$(echo "$DATA" | grep -o '"security":{[^}]*}' 2>/dev/null || echo "")"
+fi
 
 if [ "$JSON_MODE" = "1" ]; then
   # Machine-readable — echo the whole security section (or empty object)
