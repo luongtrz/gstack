@@ -1873,7 +1873,11 @@ async function start() {
         const activeTab = browserManager?.getActiveTabId?.() ?? 0;
         // Return per-tab agent status so the sidebar shows the right state per tab
         const tabAgentStatus = tabId !== null ? getTabAgentStatus(tabId) : agentStatus;
-        return new Response(JSON.stringify({ entries, total: chatNextId, agentStatus: tabAgentStatus, activeTabId: activeTab }), {
+        // Piggyback security state on the existing 300ms poll. Cheap:
+        // getSecurityStatus reads ~/.gstack/security/session-state.json.
+        // Sidepanel uses this to flip the shield icon when classifier
+        // warmup completes after initial connect.
+        return new Response(JSON.stringify({ entries, total: chatNextId, agentStatus: tabAgentStatus, activeTabId: activeTab, security: getSecurityStatus() }), {
           status: 200,
           headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': 'http://127.0.0.1' },
         });

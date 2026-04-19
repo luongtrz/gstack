@@ -557,6 +557,12 @@ async function pollChat() {
       if (data.total === 0 && welcome) welcome.style.display = '';
     }
 
+    // Shield icon state rides the chat poll (every 300ms in fast mode,
+    // slower when idle). When the ML classifier finishes warming after
+    // initial connect — typically 30s on first run — the shield flips
+    // from 'off' to 'protected' without the user needing to reload.
+    if (data.security) updateSecurityShield(data.security);
+
     if (data.entries && data.entries.length > 0) {
       // Hide welcome on first real entry
       const welcome = document.getElementById('chat-welcome');
