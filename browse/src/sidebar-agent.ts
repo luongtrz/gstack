@@ -16,6 +16,7 @@ import { safeUnlink } from './error-handling';
 import {
   checkCanaryInStructure, logAttempt, hashPayload, extractDomain,
   combineVerdict, writeSessionState, readSessionState, THRESHOLDS,
+  readDecision, clearDecision, excerptForReview,
   type LayerSignal,
 } from './security';
 import {
@@ -643,15 +644,26 @@ async function askClaude(queueEntry: QueueEntry): Promise<void> {
         if (result.verdict !== 'block') return;
         toolResultBlockFired = true;
         const domain = extractDomain(pageUrl ?? '');
+        const payloadHash = hashPayload(text.slice(0, 4096));
+
+        // Log pending — if the user overrides, we'll update via a separate
+        // log line. The attempts.jsonl is append-only so both entries survive.
         logAttempt({
           ts: new Date().toISOString(),
           urlDomain: domain,
-          payloadHash: hashPayload(text.slice(0, 4096)),
+          payloadHash,
           confidence: result.confidence,
           layer: 'testsavant_content',
           verdict: 'block',
         });
-        console.warn(`[sidebar-agent] Tool-result BLOCK on ${toolName} for tab ${tid} (confidence=${result.confidence.toFixed(3)})`);
+        console.warn(`[sidebar-agent] Tool-result BLOCK on ${toolName} for tab ${tid} (confidence=${result.confidence.toFixed(3)}) — awaiting user decision`);
+
+        // Surface a REVIEWABLE block event. Sidepanel renders the suspected
+        // text + layer scores + [Allow and continue] / [Block session] buttons.
+        // The user has 60s to decide; default is BLOCK (safe fallback).
+        const layerScores = signals
+          .filter((s) => s.confidence > 0)
+          .map((s) => ({ layer: s.layer, confidence: s.confidence }));
         await sendEvent({
           type: 'security_event',
           verdict: 'block',
@@ -660,10 +672,61 @@ async function askClaude(queueEntry: QueueEntry): Promise<void> {
           confidence: result.confidence,
           domain,
           tool: toolName,
+          reviewable: true,
+          suspected_text: excerptForReview(text),
+          signals: layerScores,
         }, tid);
+
+        // Poll for the user's decision. Default to BLOCK on timeout.
+        const REVIEW_TIMEOUT_MS = 60_000;
+        const POLL_MS = 500;
+        clearDecision(tid); // clear any stale decision from a prior session
+        const deadline = Date.now() + REVIEW_TIMEOUT_MS;
+        let decision: 'allow' | 'block' = 'block';
+        let decisionReason = 'timeout';
+        while (Date.now() < deadline) {
+          const rec = readDecision(tid);
+          if (rec?.decision === 'allow' || rec?.decision === 'block') {
+            decision = rec.decision;
+            decisionReason = rec.reason ?? 'user';
+            break;
+          }
+          await new Promise((r) => setTimeout(r, POLL_MS));
+        }
+        clearDecision(tid);
+
+        if (decision === 'allow') {
+          // User overrode. Log the override so the audit trail captures it.
+          // toolResultBlockFired stays true so we don't re-prompt within the
+          // same message — one override per BLOCK event.
+          logAttempt({
+            ts: new Date().toISOString(),
+            urlDomain: domain,
+            payloadHash,
+            confidence: result.confidence,
+            layer: 'testsavant_content',
+            verdict: 'user_overrode',
+          });
+          await sendEvent({
+            type: 'security_event',
+            verdict: 'user_overrode',
+            reason: 'tool_result_ml',
+            layer: 'testsavant_content',
+            confidence: result.confidence,
+            domain,
+            tool: toolName,
+          }, tid);
+          console.warn(`[sidebar-agent] Tab ${tid}: user overrode BLOCK — session continues`);
+          // Let the block stay consumed; reset the flag so subsequent tool
+          // results get scanned fresh.
+          toolResultBlockFired = false;
+          return;
+        }
+
+        // User chose BLOCK (or timed out). Kill the session as before.
         await sendEvent({
           type: 'agent_error',
-          error: `Session terminated — prompt injection detected in ${toolName} output`,
+          error: `Session terminated — prompt injection detected in ${toolName} output${decisionReason === 'timeout' ? ' (review timeout)' : ''}`,
         }, tid);
         try { proc.kill('SIGTERM'); } catch (err: any) { if (err?.code !== 'ESRCH') throw err; }
         setTimeout(() => {
