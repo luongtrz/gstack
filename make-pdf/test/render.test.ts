@@ -354,3 +354,79 @@ describe("render() — pageNumbers data flow", () => {
     expect(result.printCss).toMatch(/@bottom-center\s*\{\s*content:\s*counter\(page\)/);
   });
 });
+
+// ─── render() — HTML entity handling in titles, cover, TOC ───────────
+
+describe("render() — no double HTML entity escaping", () => {
+  type Case = { char: string; inTitle: string; expectedTitleMeta: string };
+
+  // Only characters that should flow through unchanged. `"` and `'` are
+  // omitted from this set because smartypants converts them to curly quotes
+  // before heading extraction — asserted separately below.
+  const cases: Case[] = [
+    { char: "&", inTitle: "A & B", expectedTitleMeta: "A & B" },
+    { char: "<", inTitle: "A < B", expectedTitleMeta: "A < B" },
+    { char: ">", inTitle: "A > B", expectedTitleMeta: "A > B" },
+    { char: "©", inTitle: "A © B", expectedTitleMeta: "A © B" },
+    { char: "—", inTitle: "A — B", expectedTitleMeta: "A — B" },
+  ];
+
+  for (const { char, inTitle, expectedTitleMeta } of cases) {
+    test(`"${char}" in H1 has no double-escape in <title> or cover`, () => {
+      const result = render({
+        markdown: `# ${inTitle}\n\nBody.`,
+        cover: true,
+        author: "A",
+      });
+      // Meta: decoded plain text.
+      expect(result.meta.title).toBe(expectedTitleMeta);
+      // HTML: <title>...</title> never contains double-escape patterns.
+      expect(result.html).not.toMatch(/<title>[^<]*&amp;amp;/);
+      expect(result.html).not.toMatch(/<title>[^<]*&amp;lt;/);
+      expect(result.html).not.toMatch(/<title>[^<]*&amp;gt;/);
+      expect(result.html).not.toMatch(/<title>[^<]*&amp;#\d+;/);
+      expect(result.html).not.toMatch(/<title>[^<]*&amp;#x[0-9a-fA-F]+;/);
+      // Cover block also single-escape.
+      expect(result.html).not.toMatch(/class="cover-title"[^>]*>[^<]*&amp;amp;/);
+    });
+  }
+
+  test('ampersand in <title> renders as exactly one "&amp;"', () => {
+    const result = render({ markdown: `# Herbert & Garry\n\nBody.` });
+    expect(result.html).toContain("<title>Herbert &amp; Garry</title>");
+    expect(result.html).not.toContain("&amp;amp;");
+  });
+
+  test("TOC entries have no double-escape when a heading contains '&'", () => {
+    const result = render({
+      markdown: `# Doc\n\n## Herbert & Garry\n\nBody.\n\n## Other\n\nMore.`,
+      toc: true,
+    });
+    // TOC renders the heading text through escapeHtml; must be single-escaped.
+    expect(result.html).toContain("Herbert &amp; Garry");
+    expect(result.html).not.toContain("&amp;amp;");
+  });
+
+  test('numeric entity in H1 (e.g. "&#169;") decodes cleanly to <title>', () => {
+    // Marked passes through numeric entities verbatim in the HTML output,
+    // so the decoder must handle them.
+    const result = render({ markdown: `# A &#169; B\n\nBody.` });
+    expect(result.meta.title).toBe("A © B");
+    expect(result.html).toContain("<title>A © B</title>");
+  });
+
+  test("smartypants converts raw quotes in title BEFORE extraction (contract)", () => {
+    // We do NOT assert raw `"` survives — smartypants is expected to convert it.
+    // The contract is: no double-escape of the encoded form.
+    const result = render({ markdown: `# Say "hi"\n\nBody.` });
+    expect(result.html).not.toContain("&amp;quot;");
+    expect(result.html).not.toContain("&amp;#39;");
+    // And <title> contains exactly one level of escaping.
+    const titleMatch = result.html.match(/<title>([^<]*)<\/title>/);
+    expect(titleMatch).toBeTruthy();
+    if (titleMatch) {
+      // Never contains a double-encoded entity.
+      expect(titleMatch[1]).not.toMatch(/&amp;(amp|lt|gt|quot|#\d+);/);
+    }
+  });
+});

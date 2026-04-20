@@ -288,7 +288,7 @@ function extractHeadings(html: string): Array<{ level: number; text: string }> {
   let match;
   while ((match = re.exec(html)) !== null) {
     const level = parseInt(match[1].slice(1), 10);
-    const text = stripTags(match[2]).trim();
+    const text = decodeTextEntities(stripTags(match[2]).trim());
     if (text) headings.push({ level, text });
   }
   return headings;
@@ -324,7 +324,32 @@ function wrapChaptersByH1(html: string): string {
 
 function extractFirstHeading(html: string): string | null {
   const m = html.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i);
-  return m ? stripTags(m[1]).trim() : null;
+  return m ? decodeTextEntities(stripTags(m[1]).trim()) : null;
+}
+
+/**
+ * Decode HTML entities in plain text extracted from rendered HTML. Distinct
+ * from decodeTypographicEntities (which runs on in-pipeline HTML and preserves
+ * &amp; because &amp;amp; can be legitimate there). This runs on text destined
+ * for <title>, cover, and TOC entries where &amp; MUST become & or escapeHtml
+ * produces &amp;amp;.
+ *
+ * Amp-last ordering: input "&amp;#169;" decodes to "&#169;" in the named pass,
+ * then the numeric pass decodes "&#169;" to "©". Decoding &amp; first would
+ * produce "&#169;" and the numeric pass would consume it — different end state
+ * but risks double-decode on inputs like "&amp;lt;".
+ */
+function decodeTextEntities(s: string): string {
+  return s
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&#x27;/g, "'")
+    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(parseInt(n, 10)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, n) => String.fromCodePoint(parseInt(n, 16)))
+    .replace(/&amp;/g, "&");
 }
 
 function stripTags(html: string): string {
