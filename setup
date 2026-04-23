@@ -726,7 +726,7 @@ create_copilot_runtime_root() {
     rm -rf "$copilot_gstack"
   fi
 
-  mkdir -p "$copilot_gstack" "$copilot_gstack/browse" "$copilot_gstack/design" "$copilot_gstack/gstack-upgrade" "$copilot_gstack/review" "$copilot_gstack/qa" "$copilot_gstack/plan-devex-review"
+  mkdir -p "$copilot_gstack" "$copilot_gstack/browse" "$copilot_gstack/design" "$copilot_gstack/review" "$copilot_gstack/qa" "$copilot_gstack/plan-devex-review"
 
   if [ -f "$copilot_dir/gstack/SKILL.md" ]; then
     ln -snf "$copilot_dir/gstack/SKILL.md" "$copilot_gstack/SKILL.md"
@@ -742,9 +742,6 @@ create_copilot_runtime_root() {
   fi
   if [ -d "$gstack_dir/design/dist" ]; then
     ln -snf "$gstack_dir/design/dist" "$copilot_gstack/design/dist"
-  fi
-  if [ -f "$copilot_dir/gstack-upgrade/SKILL.md" ]; then
-    ln -snf "$copilot_dir/gstack-upgrade/SKILL.md" "$copilot_gstack/gstack-upgrade/SKILL.md"
   fi
   for f in checklist.md design-checklist.md greptile-triage.md TODOS-format.md; do
     if [ -f "$gstack_dir/review/$f" ]; then

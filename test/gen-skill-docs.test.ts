@@ -2188,6 +2188,11 @@ describe('setup script validation', () => {
     expect(setupContent).toContain('dx-hall-of-fame.md');
   });
 
+  test('copilot runtime root does not duplicate gstack-upgrade skill', () => {
+    expect(setupContent).toContain('create_copilot_runtime_root');
+    expect(setupContent).not.toContain('copilot_gstack/gstack-upgrade/SKILL.md');
+  });
+
   test('create_agents_sidecar links runtime assets', () => {
     // Sidecar must link bin, browse, review, qa
     const fnStart = setupContent.indexOf('create_agents_sidecar()');
